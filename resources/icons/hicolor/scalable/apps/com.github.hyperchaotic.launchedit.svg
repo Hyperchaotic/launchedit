@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <style>
+      .tile { fill:#4f6af2; stroke:#1a1a1a; stroke-width:4; stroke-linejoin:round; }
+      .rocket-body { fill:#ffffff; stroke:#1a1a1a; stroke-width:4; stroke-linejoin:round; }
+      .flame { fill:#ffcc4d; stroke:#1a1a1a; stroke-width:3; stroke-linejoin:round; }
+      .trail { fill:none; stroke:#ffffff; stroke-width:3; stroke-linecap:round; opacity:0.5; }
+    </style>
+  </defs>
+
+  <!-- background app tile -->
+  <rect x="8" y="8" width="112" height="112" rx="24" ry="24" class="tile"/>
+
+  <g transform="translate(64,64) scale(1.4) rotate(-15)">
+    <!-- body -->
+    <path d="M0,-32 C-8,-16 -8,8 0,24 C8,8 8,-16 0,-32 Z" class="rocket-body"/>
+    <!-- window -->
+    <circle cx="0" cy="-8" r="5" fill="#4f6af2" stroke="#1a1a1a" stroke-width="3"/>
+    <!-- fins -->
+    <path d="M-8,12 L-20,20 L-8,20 Z M8,12 L20,20 L8,20 Z" fill="#ffcc4d" stroke="#1a1a1a" stroke-width="3"/>
+    <!-- flame -->
+    <path d="M0,24 C-4,30 0,36 4,30 Z" class="flame"/>
+  </g>
+
+  <!-- launch trail arcs -->
+  <path d="M32 102 Q64 118 96 102" class="trail"/>
+  <path d="M28 110 Q64 126 100 110" class="trail"/>
+</svg>

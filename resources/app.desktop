@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Desktop Entry File Editor
+Comment=Edit and validate .desktop files
+Type=Application
+Icon=com.github.hyperchaotic.launchedit
+Exec=launchedit %F
+Terminal=false
+StartupNotify=true
+Categories=COSMIC;utilities
+Keywords=COSMIC
+MimeType=application/x-desktop;
+Terminal=false
