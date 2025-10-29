@@ -1,4 +1,4 @@
-# Desktop Edit
+# Desktop Entry Editor
 
 A .desktop entry editor for the COSMIC™ desktop
 
