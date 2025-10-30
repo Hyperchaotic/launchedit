@@ -663,13 +663,7 @@ impl cosmic::Application for AppModel {
 
 impl AppModel {
     pub fn update_title(&mut self) -> Task<cosmic::Action<Message>> {
-        let mut window_title = fl!("app-title");
-
-        if let Some(page) = self.nav.text(self.nav.active()) {
-            window_title.push_str(" — ");
-            window_title.push_str(page);
-        }
-
+        let window_title = fl!("app-title");
         if let Some(id) = self.core.main_window_id() {
             self.set_window_title(window_title, id)
         } else {

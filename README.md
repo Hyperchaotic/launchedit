@@ -6,7 +6,6 @@ A .desktop entry editor for the supporting desktop environments
 
 - [x] Take file parameter and support X-Desktop minetype, so can work with Open With
 - [x] Support editing and creating type = Application/Link/Directory
-- [x] Use XDG portal for native open/save dialogs or through Flatpak
 - [x] Read mime descriptions from system xml files like those in /usr/share/mime
 - [x] search system common locations for icons, including Flatpak sandbox
 - [ ] Support editing/creating Actions
