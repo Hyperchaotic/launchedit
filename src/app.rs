@@ -39,6 +39,12 @@ const APP_ICON: &[u8] = include_bytes!(
     "../resources/icons/hicolor/scalable/apps/com.github.hyperchaotic.launchedit.svg"
 );
 
+const GENERAL_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/general.svg");
+const MIMETYPES_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/mimetypes.svg");
+const ACTIONS_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/actions.svg");
+const CUSTOM_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/extensions.svg");
+const ADVANCED_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/advanced.svg");
+
 macro_rules! desktop_edit_field {
     ($key:expr, $hint:expr, $value:expr, $am_editing:expr, $self:ident) => {{
         widget::editable_input($hint, $value, $am_editing, |_| Message::ToggleEdit($key))
@@ -1600,7 +1606,7 @@ impl AppModel {
         nav.insert()
             .text(fl!("nav-general"))
             .data::<NavPage>(NavPage::General)
-            .icon(icon::from_name("applications-science-symbolic"))
+            .icon(icon::from_svg_bytes(GENERAL_ICON).symbolic(true).icon())
             .activate();
 
         if let Some(t) = self.entry_type()
@@ -1609,22 +1615,22 @@ impl AppModel {
             nav.insert()
                 .text(fl!("nav-mimetypes"))
                 .data::<NavPage>(NavPage::Mimetypes)
-                .icon(icon::from_name("applications-system-symbolic"));
+                .icon(icon::from_svg_bytes(MIMETYPES_ICON).symbolic(true).icon());
 
             nav.insert()
                 .text(fl!("nav-actions"))
                 .data::<NavPage>(NavPage::Actions)
-                .icon(icon::from_name("applications-games-symbolic"));
+                .icon(icon::from_svg_bytes(ACTIONS_ICON).symbolic(true).icon());
 
             nav.insert()
                 .text(fl!("nav-custom"))
                 .data::<NavPage>(NavPage::Custom)
-                .icon(icon::from_name("applications-games-symbolic"));
+                .icon(icon::from_svg_bytes(CUSTOM_ICON).symbolic(true).icon());
 
             nav.insert()
                 .text(fl!("nav-advanced"))
                 .data::<NavPage>(NavPage::Advanced)
-                .icon(icon::from_name("applications-games-symbolic"));
+                .icon(icon::from_svg_bytes(ADVANCED_ICON).symbolic(true).icon());
         }
 
         nav.activate_position(0);
