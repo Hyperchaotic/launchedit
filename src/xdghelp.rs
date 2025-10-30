@@ -124,20 +124,33 @@ pub async fn save_desktop_file(suggested_name: String, kind: DesktopEntryType) -
 pub async fn open_path(kind: PickKind) -> (Option<PathBuf>, PickKind) {
     use ashpd::desktop::file_chooser::{FileFilter, OpenFileRequest};
 
-    let mut request = OpenFileRequest::default()
-        .title(kind.title())
-        .accept_label("Select")
-        .modal(true);
+    let base = || {
+        OpenFileRequest::default()
+            .title(kind.title())
+            .accept_label("Select")
+            .modal(true)
+    };
 
-    match kind {
-        PickKind::Directory => {
-            request = request.directory(true);
-        }
+    let request = match kind {
+        PickKind::Directory => base().directory(true),
         PickKind::DesktopFile => {
             let filter = FileFilter::new(*DESKTOP_FILES)
                 .glob("*.desktop")
                 .mimetype("application/x-desktop");
-            request = request.filter(filter);
+
+            match dirs::home_dir().map(|h| h.join(".local").join("share").join("applications")) {
+                None => base(),
+                Some(folder) => {
+                    // Try building with current_folder first
+                    match base().current_folder(folder) {
+                        Ok(req) => req.filter(filter),
+                        Err(e) => {
+                            log::error!("Failed to set start folder {}", e);
+                            base().filter(filter)
+                        }
+                    }
+                }
+            }
         }
         PickKind::Executable | PickKind::TryExecutable => {
             let filter = FileFilter::new(*EXECUTABLES)
@@ -145,7 +158,7 @@ pub async fn open_path(kind: PickKind) -> (Option<PathBuf>, PickKind) {
                 .glob("*.bin")
                 .mimetype("application/x-executable")
                 .mimetype("text/x-shellscript");
-            request = request.filter(filter);
+            base().filter(filter)
         }
         PickKind::IconFile => {
             // Common icon/image types used by desktop entries & themes
@@ -157,9 +170,9 @@ pub async fn open_path(kind: PickKind) -> (Option<PathBuf>, PickKind) {
                 .mimetype("image/png")
                 .mimetype("image/svg+xml")
                 .mimetype("image/jpeg");
-            request = request.filter(filter);
+            base().filter(filter)
         }
-    }
+    };
 
     let response = match request.send().await {
         Ok(rq) => match rq.response() {
