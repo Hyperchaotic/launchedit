@@ -717,7 +717,7 @@ impl AppModel {
             .align_y(Center)
             .align_x(Center);
 
-        let label_w = 130;
+        let label_w = 160;
         let locales = &self.locales;
         let folder = widget::icon::from_name("folder-symbolic").handle();
 
@@ -889,7 +889,7 @@ impl AppModel {
             .align_y(Center)
             .align_x(Center);
 
-        let label_w = 130;
+        let label_w = 160;
         let locales = &self.locales;
         let folder = widget::icon::from_name("folder-symbolic").handle();
 
@@ -1136,7 +1136,7 @@ impl AppModel {
         &'a self,
         appdata: &'a DesktopEntry,
     ) -> Element<'a, crate::app::Message> {
-        let label_w = 130;
+        let label_w = 160;
         let locales = &self.locales;
         let folder = widget::icon::from_name("folder-symbolic").handle();
 
@@ -1245,6 +1245,18 @@ impl AppModel {
             )
             .add(
                 row!(
+                    widget::text(fl!("field-nondefaultgpu"))
+                        .align_x(Left)
+                        .width(label_w),
+                    horizontal_space(),
+                    widget::toggler(appdata.prefers_non_default_gpu())
+                        .on_toggle(|b| Message::SetBoolEntry(DesktopKey::PrefersNonDefaultGPU, b)),
+                )
+                .align_y(Center)
+                .spacing(5),
+            )
+            .add(
+                row!(
                     widget::text(fl!("field-hide")).align_x(Left).width(label_w),
                     horizontal_space(),
                     widget::toggler(appdata.no_display())
@@ -1268,7 +1280,7 @@ impl AppModel {
         &'a self,
         appdata: &'a DesktopEntry,
     ) -> Element<'a, crate::app::Message> {
-        let label_w = 130;
+        let label_w = 160;
         let locales = &self.locales;
         let folder = widget::icon::from_name("folder-symbolic").handle();
 
@@ -1436,18 +1448,6 @@ impl AppModel {
                     horizontal_space(),
                     widget::toggler(appdata.startup_notify())
                         .on_toggle(|b| Message::SetBoolEntry(DesktopKey::StartupNotify, b)),
-                )
-                .align_y(Center)
-                .spacing(5),
-            )
-            .add(
-                row!(
-                    widget::text(fl!("field-nondefaultgpu"))
-                        .align_x(Left)
-                        .width(label_w),
-                    horizontal_space(),
-                    widget::toggler(appdata.prefers_non_default_gpu())
-                        .on_toggle(|b| Message::SetBoolEntry(DesktopKey::PrefersNonDefaultGPU, b)),
                 )
                 .align_y(Center)
                 .spacing(5),
