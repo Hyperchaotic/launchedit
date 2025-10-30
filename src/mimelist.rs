@@ -4,8 +4,9 @@ use cosmic::iced;
 use cosmic::widget::table;
 use log::info;
 use std::collections::HashMap;
-use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
+use std::{env, fs};
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy, Hash)]
 pub enum MimeCategory {
@@ -60,7 +61,6 @@ impl table::ItemInterface<MimeCategory> for MimeItem {
     }
 }
 
-/// Cached icon resolver that respects XDG_DATA_DIRS, themes, and sizes.
 pub struct MimeCache {
     mime_descriptions: HashMap<String, String>,
 }
@@ -76,7 +76,6 @@ impl Default for MimeCache {
 }
 
 impl MimeCache {
-
     pub fn lookup(&self, name: &str) -> Option<&String> {
         self.mime_descriptions.get(name)
     }
@@ -98,9 +97,45 @@ impl MimeCache {
         }
     }
 
+    pub fn get_mime_aliases() -> HashMap<String, String> {
+        let mut paths: Vec<PathBuf> = Vec::new();
+        let mut aliases = HashMap::new();
+
+        paths.push(PathBuf::from("/usr/share/mime/aliases"));
+        paths.push(PathBuf::from("/usr/local/share/mime/aliases"));
+
+        if let Ok(fp) = env::var("FLATPAK_ID") {
+            if let Ok(runtime) = env::var("FLATPAK_RUNTIME_DIR") {
+                paths.push(PathBuf::from(runtime).join("mime/aliases"));
+            }
+            paths.push(PathBuf::from("/app/share/mime/aliases"));
+            paths.push(PathBuf::from("/usr/share/mime/aliases"));
+        }
+
+        for path in paths {
+            if let Ok(file) = fs::File::open(&path) {
+                info!("Reading mime aliases from {}", path.display());
+                let reader = BufReader::new(file);
+                for line in reader.lines().flatten() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.starts_with('#') {
+                        continue;
+                    }
+                    if let Some((alias, canon)) = trimmed.split_once(char::is_whitespace) {
+                        aliases.insert(canon.to_owned(), alias.to_owned());
+                    }
+                }
+            }
+        }
+        info!("Loaded {} mime aliases.", aliases.len());
+        aliases
+    }
+
     pub fn scan(&mut self) {
         self.mime_descriptions.clear();
         let langs = freedesktop_desktop_entry::get_languages_from_env();
+
+        let aliases = Self::get_mime_aliases();
 
         for dir in Self::candidate_mime_dirs() {
             if let Ok(read_dir) = fs::read_dir(&dir) {
@@ -154,15 +189,21 @@ impl MimeCache {
                                             }
                                         }
                                     } else {
-                                        // no xml:lang = generic fallback from the database
                                         fallback_unlocalized = Some(txt.to_string());
                                     }
                                 }
 
                                 let chosen = best_text.or(fallback_unlocalized);
 
+                                // So we insert the new mimetype/description but if there's an alias
+                                // we also insert that
                                 if let Some(desc) = chosen {
-                                    self.mime_descriptions.entry(mime_type).or_insert(desc);
+                                    self.mime_descriptions
+                                        .entry(mime_type.clone())
+                                        .or_insert(desc.clone());
+                                    if let Some(alias) = aliases.get(&mime_type) {
+                                        self.mime_descriptions.entry(alias.clone()).or_insert(desc);
+                                    }
                                 }
                             }
                         }
@@ -170,6 +211,9 @@ impl MimeCache {
                 }
             }
         }
-        info!("Mime cache: Loaded {} mime type descriptions", self.mime_descriptions.len());
+        info!(
+            "Mime cache: Loaded {} mime type descriptions",
+            self.mime_descriptions.len()
+        );
     }
 }

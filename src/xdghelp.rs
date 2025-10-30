@@ -97,7 +97,7 @@ pub async fn save_desktop_file(suggested_name: String, kind: DesktopEntryType) -
                 match base().current_folder(folder) {
                     Ok(req) => req,
                     Err(e) => {
-                        eprintln!("Failed to set start folder {}", e);
+                        log::error!("Failed to set start folder {}", e);
                         base()
                     }
                 }
@@ -108,12 +108,12 @@ pub async fn save_desktop_file(suggested_name: String, kind: DesktopEntryType) -
         Ok(rq) => match rq.response() {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("Portal response error: {e}");
+                log::error!("Portal response error: {e}");
                 return None;
             }
         },
         Err(e) => {
-            eprintln!("Portal send error: {e}");
+            log::error!("Portal send error: {e}");
             return None;
         }
     };
@@ -165,12 +165,12 @@ pub async fn open_path(kind: PickKind) -> (Option<PathBuf>, PickKind) {
         Ok(rq) => match rq.response() {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("Portal response error: {e}");
+                log::error!("Portal response error: {e}");
                 return (None, kind);
             }
         },
         Err(e) => {
-            eprintln!("Portal send error: {e}");
+            log::error!("Portal send error: {e}");
             return (None, kind);
         }
     };
