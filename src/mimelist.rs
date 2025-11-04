@@ -68,7 +68,7 @@ pub struct MimeCache {
 impl Default for MimeCache {
     fn default() -> Self {
         let mut cache = Self {
-            mime_descriptions: Default::default(),
+            mime_descriptions: HashMap::default(),
         };
         cache.scan();
         cache
@@ -104,7 +104,7 @@ impl MimeCache {
         paths.push(PathBuf::from("/usr/share/mime/aliases"));
         paths.push(PathBuf::from("/usr/local/share/mime/aliases"));
 
-        if let Ok(fp) = env::var("FLATPAK_ID") {
+        if env::var("FLATPAK_ID").is_ok() {
             if let Ok(runtime) = env::var("FLATPAK_RUNTIME_DIR") {
                 paths.push(PathBuf::from(runtime).join("mime/aliases"));
             }
@@ -116,7 +116,7 @@ impl MimeCache {
             if let Ok(file) = fs::File::open(&path) {
                 info!("Reading mime aliases from {}", path.display());
                 let reader = BufReader::new(file);
-                for line in reader.lines().flatten() {
+                for line in reader.lines().map_while(Result::ok) {
                     let trimmed = line.trim();
                     if trimmed.is_empty() || trimmed.starts_with('#') {
                         continue;

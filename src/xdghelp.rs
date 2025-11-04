@@ -50,8 +50,7 @@ impl PickKind {
     pub fn title(self) -> &'static str {
         match self {
             PickKind::DesktopFile => *TITLE_DESKTOP_FILE,
-            PickKind::Executable => *TITLE_EXECUTABLE,
-            PickKind::TryExecutable => *TITLE_EXECUTABLE,
+            PickKind::Executable | PickKind::TryExecutable => *TITLE_EXECUTABLE,
             PickKind::Directory => *TITLE_DIRECTORY,
             PickKind::IconFile => *TITLE_ICON_FILE,
         }
@@ -97,7 +96,7 @@ pub async fn save_desktop_file(suggested_name: String, kind: DesktopEntryType) -
                 match base().current_folder(folder) {
                     Ok(req) => req,
                     Err(e) => {
-                        log::error!("Failed to set start folder {}", e);
+                        log::error!("Failed to set start folder {e}");
                         base()
                     }
                 }
@@ -145,7 +144,7 @@ pub async fn open_path(kind: PickKind) -> (Option<PathBuf>, PickKind) {
                     match base().current_folder(folder) {
                         Ok(req) => req.filter(filter),
                         Err(e) => {
-                            log::error!("Failed to set start folder {}", e);
+                            log::error!("Failed to set start folder {e}");
                             base().filter(filter)
                         }
                     }
@@ -200,8 +199,8 @@ pub struct IconCache {
 impl Default for IconCache {
     fn default() -> Self {
         let mut cache = Self {
-            by_name_no_ext: Default::default(),
-            by_full_name: Default::default(),
+            by_name_no_ext: HashMap::default(),
+            by_full_name: HashMap::default(),
         };
         cache.scan();
         cache

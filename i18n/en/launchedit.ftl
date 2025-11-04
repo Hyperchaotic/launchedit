@@ -1,4 +1,10 @@
 app-title = Desktop Entry Editor
+
+generic-name = Name
+generic-value = Value
+generic-save = Save
+generic-cancel = Cancel
+
 menu-about = About
 menu-view = View
 menu-file = File
@@ -39,10 +45,15 @@ nav-actions = Actions
 nav-custom = Vendor Extensions
 nav-advanced = Advanced
 
+dialog-title-newmime = New Mimetype
+dialog-title-newxkey = New X-Custom key
+dialog-title-newaction = New Action
+dialog-title-editaction = Edit Action
+
 menu-new = New
 menu-newapplication = Application
 menu-newlink = Link (URL)
-menu-newdirectory = Folder Description 
+menu-newdirectory = Folder Description
 
 select-desktop = Select .desktop file
 select-executable = Select Executable
@@ -50,7 +61,7 @@ select-directory = Select Working directory
 select-icon = Select Icon File
 save-desktopfile = Save .desktop file
 
-field-name = name
+field-name = Name
 field-genericname = Generic name
 field-icon = Icon
 field-comment = Comment

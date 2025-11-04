@@ -5,6 +5,7 @@ mod config;
 mod i18n;
 mod mimelist;
 mod xdghelp;
+mod xkeys;
 
 use chrono::Local;
 use cosmic::iced::Limits;

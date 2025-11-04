@@ -4,6 +4,7 @@ use crate::config::Config;
 use crate::fl;
 use crate::mimelist::{MimeCache, MimeCategory, MimeItem};
 use crate::xdghelp::{IconCache, PickKind, open_path, save_desktop_file};
+use crate::xkeys::{XKeyCategory, XKeyItem, remove_x_key};
 
 use cosmic::app::context_drawer;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
@@ -11,8 +12,9 @@ use cosmic::iced::Alignment::Center;
 use cosmic::iced::alignment::Horizontal::Left;
 use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::keyboard::Modifiers;
-use cosmic::iced::{Alignment, Length, Subscription, event, keyboard, window};
+use cosmic::iced::{Alignment, Length, Size, Subscription, event, keyboard, window};
 
+use cosmic::iced::core::window::Id as WindowId;
 use cosmic::iced::keyboard::Key;
 use cosmic::iced::{widget::column, widget::row};
 use cosmic::prelude::*;
@@ -24,17 +26,19 @@ use cosmic::{Apply, Element};
 use cosmic::{cosmic_theme, theme};
 use freedesktop_desktop_entry::{DecodeError, DesktopEntry};
 use futures_util::SinkExt;
+use log::info;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::LazyLock;
 use std::{env, path::Path};
 use thiserror::Error;
 
-use std::borrow::Cow;
-
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
+
 const APP_ICON: &[u8] = include_bytes!(
     "../resources/icons/hicolor/scalable/apps/com.github.hyperchaotic.launchedit.svg"
 );
@@ -45,12 +49,24 @@ const ACTIONS_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/
 const CUSTOM_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/extensions.svg");
 const ADVANCED_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/advanced.svg");
 
+static FOCUSED_TEXT_INPUT_ID: LazyLock<widget::Id> =
+    LazyLock::new(|| widget::Id::new("Focused Text Input"));
+
 macro_rules! desktop_edit_field {
     ($key:expr, $hint:expr, $value:expr, $am_editing:expr, $self:ident) => {{
         widget::editable_input($hint, $value, $am_editing, |_| Message::ToggleEdit($key))
             .width(Length::Fill)
             .on_input(|t| Message::SetTextEntry($key, t))
     }};
+}
+
+// Removes all whitespace (spaces, tabs, newlines, etc.) from a string.
+macro_rules! rm_whitespace {
+    ($s:expr) => {
+        $s.chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>()
+    };
 }
 
 #[derive(Debug, Error)]
@@ -140,6 +156,19 @@ impl FromStr for DesktopEntryType {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum DialogKind {
+    NewMimetype(String),
+    NewXkey(XKeyItem),
+}
+
+#[derive(Clone, Debug)]
+struct DialogPage {
+    window_id: WindowId,
+    widget_id: widget::Id,
+    kind: DialogKind,
+}
+
 /// The application model stores app-specific state used to describe its interface and
 /// drive its logic.
 pub struct AppModel {
@@ -153,6 +182,7 @@ pub struct AppModel {
     config: Config,
     nav: nav_bar::Model,
     mime_table: table::SingleSelectModel<MimeItem, MimeCategory>,
+    xkey_table: table::SingleSelectModel<XKeyItem, XKeyCategory>,
     locales: Vec<String>,
     mime_descriptions: MimeCache,
     icon_cache: IconCache,
@@ -161,7 +191,7 @@ pub struct AppModel {
     current_entry_error: Option<AppError>,
     current_entry_changed: bool,
     am_editing: Editing,
-    new_mimetype: String,
+    dialog_data: Option<DialogPage>,
 }
 
 /// Messages emitted by the application and its widgets.
@@ -178,10 +208,18 @@ pub enum Message {
     SetBoolEntry(DesktopKey, bool),
 
     MimeItemSelect(table::Entity),
-    RemoveMimetype(Option<usize>),
-    EditNewMimetype(String),
-    CreateMimetype,
+    RemoveMimetype(usize),
+
+    XkeyItemSelect(table::Entity),
+    RemoveXkey(usize),
+
+    DialogEdit(DialogKind),
+    DialogClose(bool),
+
     CreateEntry(DesktopEntryType),
+
+    CreateDialog(DialogKind),
+    DestroyDialog,
 
     OpenRepositoryUrl,
     SubscriptionChannel,
@@ -204,7 +242,7 @@ impl cosmic::Application for AppModel {
     type Message = Message;
 
     /// Unique identifier in RDNN (reverse domain name notation) format.
-    const APP_ID: &'static str = "com.github.hyperchaotic.desktop-edit";
+    const APP_ID: &'static str = "com.github.hyperchaotic.launchedit";
 
     fn core(&self) -> &cosmic::Core {
         &self.core
@@ -243,6 +281,7 @@ impl cosmic::Application for AppModel {
                 .unwrap_or_default(),
             nav: nav_bar::Model::default(),
             mime_table: table::Model::new(vec![MimeCategory::Name, MimeCategory::Description]),
+            xkey_table: table::Model::new(vec![XKeyCategory::Name, XKeyCategory::Value]),
             locales: freedesktop_desktop_entry::get_languages_from_env(),
             mime_descriptions: MimeCache::default(),
             icon_cache: IconCache::default(),
@@ -251,7 +290,7 @@ impl cosmic::Application for AppModel {
             current_entry_error: None,
             current_entry_changed: false,
             am_editing: Editing::default(),
-            new_mimetype: String::new(),
+            dialog_data: None,
         };
 
         app.load_entry_from_args();
@@ -428,6 +467,94 @@ impl cosmic::Application for AppModel {
         }
     }
 
+    fn view_window(&self, _id: WindowId) -> Element<'_, Self::Message> {
+        if let Some(dialog_data) = &self.dialog_data {
+            let theme = cosmic::theme::active();
+            let padding = if self.core.is_condensed() {
+                theme.cosmic().space_s()
+            } else {
+                theme.cosmic().space_l()
+            };
+
+            let dialog = match &dialog_data.kind {
+                DialogKind::NewMimetype(text) => {
+                    let ok_button = if text.is_empty() {
+                        widget::button::suggested(fl!("generic-save"))
+                    } else {
+                        widget::button::suggested(fl!("generic-save"))
+                            .on_press(Message::DialogClose(true))
+                    };
+
+                    widget::dialog()
+                        .title(fl!("dialog-title-newmime"))
+                        .primary_action(ok_button)
+                        .secondary_action(
+                            widget::button::standard(fl!("generic-cancel"))
+                                .on_press(Message::DialogClose(false)),
+                        )
+                        .control(
+                            widget::text_input("", text)
+                                .id(FOCUSED_TEXT_INPUT_ID.clone())
+                                .on_input(|t| Message::DialogEdit(DialogKind::NewMimetype(t))),
+                        )
+                }
+                DialogKind::NewXkey(xkey_item) => {
+                    let ok_button = if xkey_item.name.is_empty() {
+                        widget::button::suggested(fl!("generic-save"))
+                    } else {
+                        widget::button::suggested(fl!("generic-save"))
+                            .on_press(Message::DialogClose(true))
+                    };
+
+                    let name = xkey_item.name.clone();
+                    let value = xkey_item.value.clone();
+
+                    widget::dialog()
+                        .title(fl!("dialog-title-newxkey"))
+                        .primary_action(ok_button)
+                        .secondary_action(
+                            widget::button::standard(fl!("generic-cancel"))
+                                .on_press(Message::DialogClose(false)),
+                        )
+                        .control(
+                            column!(
+                                {
+                                    let x = xkey_item.clone();
+                                    column!(
+                                        widget::text::body(fl!("generic-name")).width(100),
+                                        widget::text_input("X-Custom", name.clone())
+                                            .id(FOCUSED_TEXT_INPUT_ID.clone())
+                                            .on_input(move |t| {
+                                                let mut new = x.clone();
+                                                new.name = t;
+                                                Message::DialogEdit(DialogKind::NewXkey(new))
+                                            })
+                                    )
+                                },
+                                {
+                                    let x = xkey_item.clone();
+                                    column!(
+                                        widget::text::body(fl!("generic-value")).width(100),
+                                        widget::text_input("true", value.clone()).on_input(
+                                            move |t| {
+                                                let mut new = x.clone();
+                                                new.value = t;
+                                                Message::DialogEdit(DialogKind::NewXkey(new))
+                                            }
+                                        )
+                                    )
+                                }
+                            )
+                            .spacing(padding),
+                        )
+                }
+            };
+
+            widget::autosize::autosize(dialog, dialog_data.widget_id.clone()).into()
+        } else {
+            horizontal_space().into()
+        }
+    }
     /// Register subscriptions for this application.
     ///
     /// Subscriptions are long-running async tasks running in the background which
@@ -477,6 +604,49 @@ impl cosmic::Application for AppModel {
     /// on the application's async runtime.
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
+            Message::CreateDialog(kind) => {
+                if self.dialog_data.is_none() {
+                    info!("Message::CreateDialog{kind:?}");
+
+                    let mut settings = window::Settings {
+                        decorations: false,
+                        level: window::Level::AlwaysOnTop,
+                        max_size: Some(Size::new(1280.0, 640.0)),
+                        min_size: Some(Size::new(320.0, 180.0)),
+                        position: window::Position::Centered,
+                        resizable: false,
+                        size: Size::new(640.0, 320.0),
+                        transparent: true,
+                        ..Default::default()
+                    };
+
+                    settings.platform_specific.application_id = Self::APP_ID.to_string();
+
+                    let (id, command) = window::open(settings);
+                    self.dialog_data = Some(DialogPage {
+                        window_id: id,
+                        widget_id: widget::Id::unique(),
+                        kind,
+                    });
+                    return Task::batch(vec![
+                        command.map(|_id| cosmic::Action::None),
+                        widget::text_input::focus(FOCUSED_TEXT_INPUT_ID.clone()),
+                    ]);
+                } else {
+                    return Task::batch(vec![
+                        self.update(Message::DestroyDialog),
+                        self.update(Message::CreateDialog(kind)),
+                    ]);
+                }
+            }
+
+            Message::DestroyDialog => {
+                info!("Message::DestroyDialog");
+                if let Some(dialog) = self.dialog_data.take() {
+                    return window::close(dialog.window_id);
+                }
+            }
+
             Message::Quit => {
                 std::process::exit(0);
             }
@@ -507,12 +677,12 @@ impl cosmic::Application for AppModel {
                 }
             }
             Message::SaveFinished(res) => {
-                println!("Message::SaveFinished {:?}", res);
+                info!("Message::SaveFinished {res:?}");
                 if let Some(path) = res
                     && let Some(entry) = &mut self.current_entry
                 {
                     if let Err(e) = Self::save_desktop_entry(&path, &entry.to_string()) {
-                        println!("Error saving {e}");
+                        info!("Error saving {e}");
                         return self.update(Message::ToggleContextPage(ContextPage::IOError(
                             e.to_string(),
                         )));
@@ -540,7 +710,7 @@ impl cosmic::Application for AppModel {
                 });
             }
             Message::Key(modifiers, key) => {
-                for (key_bind, action) in self.key_binds.iter() {
+                for (key_bind, action) in &self.key_binds {
                     if key_bind.matches(modifiers, &key) {
                         return self.update(action.message());
                     }
@@ -554,11 +724,7 @@ impl cosmic::Application for AppModel {
                             self.load_entry_from_path(&desktop_file);
                         }
                         // Save Exec or Path in current desktop entry
-                        PickKind::Executable => {
-                            self.set_exec_with_args(&desktop_file, kind, None);
-                        }
-                        // Save Exec or Path in current desktop entry
-                        PickKind::TryExecutable => {
+                        PickKind::Executable | PickKind::TryExecutable => {
                             self.set_exec_with_args(&desktop_file, kind, None);
                         }
                         PickKind::Directory => {
@@ -579,20 +745,18 @@ impl cosmic::Application for AppModel {
                 self.set_bool(key, boolean);
             }
 
-            Message::MimeItemSelect(entity) => self.mime_table.activate(entity),
             Message::OpenRepositoryUrl => {
                 _ = open::that_detached(REPOSITORY);
             }
+            Message::MimeItemSelect(entity) => self.mime_table.activate(entity),
             Message::RemoveMimetype(pos) => {
-                if let Some(p) = pos
-                    && let Some(entity) = self.mime_table.entity_at(p as u16)
-                {
+                if let Some(entity) = self.mime_table.entity_at(pos as u16) {
                     // Update table model
                     self.mime_table.remove(entity);
                     let mut mimes = Vec::new();
                     for entity in self.mime_table.iter() {
                         if let Some(mime) = self.mime_table.item(entity) {
-                            mimes.push(mime.name.to_owned());
+                            mimes.push(mime.name.clone());
                         }
                     }
                     // Update desktop entry from table
@@ -600,13 +764,49 @@ impl cosmic::Application for AppModel {
                 }
             }
 
-            Message::EditNewMimetype(string) => {
-                self.new_mimetype = string.trim_start().trim_end().to_string();
+            Message::XkeyItemSelect(entity) => self.xkey_table.activate(entity),
+            Message::RemoveXkey(pos) => {
+                if let Some(entity) = self.xkey_table.entity_at(pos as u16)
+                    && let (Some(entry), Some(item)) =
+                        (&mut self.current_entry, self.xkey_table.item(entity))
+                {
+                    let _ = remove_x_key(entry, "Desktop Entry", &item.name);
+                    self.current_entry_changed = true;
+                    // Update table model
+                    self.xkey_table.remove(entity);
+                }
             }
-            Message::CreateMimetype => {
-                let mime = self.new_mimetype.to_owned();
-                self.new_mimetype.clear();
-                self.create_mimetype(&mime);
+
+            Message::DialogEdit(edit) => {
+                if let Some(dialog_data) = &mut self.dialog_data {
+                    match (&mut dialog_data.kind, &edit) {
+                        (DialogKind::NewMimetype(data), DialogKind::NewMimetype(edit)) => {
+                            data.clone_from(edit);
+                        }
+                        (DialogKind::NewXkey(data), DialogKind::NewXkey(edit)) => {
+                            data.clone_from(edit);
+                        }
+                        _ => todo!(),
+                    }
+                }
+            }
+
+            Message::DialogClose(create) => {
+                if create && let Some(dialog_data) = &self.dialog_data {
+                    match &dialog_data.kind {
+                        DialogKind::NewMimetype(data) => {
+                            if !data.is_empty() {
+                                self.create_mimetype(&rm_whitespace!(data));
+                            }
+                        }
+                        DialogKind::NewXkey(data) => {
+                            if !data.name.is_empty() {
+                                self.create_xkey(&data.clone());
+                            }
+                        }
+                    }
+                }
+                return self.update(Message::DestroyDialog);
             }
 
             Message::CreateEntry(new_kind) => {
@@ -679,7 +879,7 @@ impl AppModel {
         let placeholder_row = |page: NavPage| {
             row!(
                 horizontal_space(),
-                widget::text::body(format!("No {}.", page)),
+                widget::text::body(format!("No {page}.")),
                 horizontal_space()
             )
             .into()
@@ -851,7 +1051,7 @@ impl AppModel {
         let placeholder_row = |page: NavPage| {
             row!(
                 horizontal_space(),
-                widget::text::body(format!("No {}.", page)),
+                widget::text::body(format!("No {page}.")),
                 horizontal_space()
             )
             .into()
@@ -1030,19 +1230,14 @@ impl AppModel {
         let active_tab_content: Element<'_, crate::app::Message> =
             match self.nav.position(self.nav.active()) {
                 Some(0) => self.view_tab_general(entry),
-                Some(1) => self.view_tab_mimetypes(entry),
+                Some(1) => self.view_tab_mimetypes(),
                 Some(2) => row!(
                     horizontal_space(),
                     widget::text::body("😵‍💫"),
                     horizontal_space()
                 )
                 .into(),
-                Some(3) => row!(
-                    horizontal_space(),
-                    widget::text::body("😵‍💫"),
-                    horizontal_space()
-                )
-                .into(),
+                Some(3) => self.view_tab_xkeys(),
                 _ => self.view_tab_advanced(entry),
             };
 
@@ -1052,27 +1247,23 @@ impl AppModel {
             .into()
     }
 
-    fn view_tab_mimetypes<'a>(
-        &'a self,
-        appdata: &'a DesktopEntry,
-    ) -> Element<'a, crate::app::Message> {
-        let mimes_owned: Option<Vec<String>> = appdata.mime_type().as_ref().map(|list| {
-            list.iter()
-                .map(|mime| mime.to_string())
-                .collect::<Vec<String>>()
-        });
-
+    fn view_tab_mimetypes<'a>(&'a self) -> Element<'a, crate::app::Message> {
         let remove_button = if let Some(pos) = self.mime_table.position(self.mime_table.active()) {
-            widget::button::text("Remove").on_press(Message::RemoveMimetype(Some(pos as usize)))
+            widget::button::text("Remove").on_press(Message::RemoveMimetype(pos as usize))
         } else {
             widget::button::text("Remove")
         };
 
-        let add_button = if self.new_mimetype.is_empty() {
-            widget::button::text("Add")
-        } else {
-            widget::button::text("Add").on_press(Message::CreateMimetype)
-        };
+        let add_button = widget::button::text("Add").on_press(Message::CreateDialog(
+            DialogKind::NewMimetype(String::new()),
+        ));
+
+        let mut positions = HashMap::new();
+        for (pos, item) in self.mime_table.iter().enumerate() {
+            if let Some(data) = self.mime_table.item(item) {
+                positions.insert(data.name.clone(), pos);
+            }
+        }
 
         row!(
             horizontal_space(),
@@ -1080,16 +1271,74 @@ impl AppModel {
                 widget::table(&self.mime_table)
                     .on_item_left_click(Message::MimeItemSelect)
                     .item_context(move |item| {
-                        let pos = mimes_owned
-                            .as_ref()
-                            .and_then(|list| list.iter().position(|n| n == &item.name));
+                        let pos = positions.get(&item.name).unwrap_or(&0);
 
                         Some(widget::menu::items(
                             &HashMap::new(),
                             vec![widget::menu::Item::Button(
                                 format!("Remove {}", item.name),
                                 None,
-                                MenuAction::RemoveMimetype(pos),
+                                MenuAction::RemoveMimetype(*pos),
+                            )],
+                        ))
+                    })
+                    .category_context(|category| {
+                        Some(widget::menu::items(
+                            &HashMap::new(),
+                            vec![
+                                widget::menu::Item::Button(
+                                    format!("Action on {category} category"),
+                                    None,
+                                    MenuAction::None,
+                                ),
+                                widget::menu::Item::Button(
+                                    format!("Other action on {category} category"),
+                                    None,
+                                    MenuAction::None,
+                                ),
+                            ],
+                        ))
+                    })
+                    .width(500),
+                row!(remove_button, add_button, horizontal_space()).width(500)
+            ),
+            horizontal_space()
+        )
+        .apply(Element::from)
+    }
+
+    fn view_tab_xkeys<'a>(&'a self) -> Element<'a, crate::app::Message> {
+        let remove_button = if let Some(pos) = self.xkey_table.position(self.xkey_table.active()) {
+            widget::button::text("Remove").on_press(Message::RemoveXkey(pos as usize))
+        } else {
+            widget::button::text("Remove")
+        };
+
+        let mut positions = HashMap::new();
+        for (pos, item) in self.xkey_table.iter().enumerate() {
+            if let Some(data) = self.xkey_table.item(item) {
+                positions.insert(data.name.clone(), pos);
+            }
+        }
+
+        let add_button = widget::button::text("Add").on_press(Message::CreateDialog(
+            DialogKind::NewXkey(XKeyItem::default()),
+        ));
+
+        row!(
+            horizontal_space(),
+            column!(
+                widget::table(&self.xkey_table)
+                    .on_item_left_click(Message::XkeyItemSelect)
+                    .item_context(move |item| {
+                        let pos = positions.get(&item.name).unwrap_or(&0);
+
+                        Some(widget::menu::items(
+                            &HashMap::new(),
+                            vec![widget::menu::Item::Button(
+                                format!("Remove {}", item.name),
+                                None,
+                                MenuAction::RemoveXkey(*pos),
                             )],
                         ))
                     })
@@ -1111,15 +1360,7 @@ impl AppModel {
                         ))
                     })
                     .width(500),
-                row!(
-                    remove_button,
-                    add_button,
-                    widget::text_input("New mimetype", &self.new_mimetype)
-                        .on_input(Message::EditNewMimetype)
-                        .width(200),
-                    horizontal_space()
-                )
-                .width(500)
+                row!(remove_button, add_button, horizontal_space()).width(500)
             ),
             horizontal_space()
         )
@@ -1500,17 +1741,19 @@ impl AppModel {
 
     pub fn set_bool(&mut self, key: DesktopKey, value: bool) {
         self.set_text(key, if value { "true" } else { "false" });
+        self.changed();
     }
 
     pub fn set_list<S: AsRef<str>>(&mut self, key: DesktopKey, items: &[S]) {
         let s = items
             .iter()
-            .map(|s| s.as_ref())
+            .map(std::convert::AsRef::as_ref)
             .collect::<Vec<_>>()
             .join(";");
         // Many tools tolerate missing trailing ';', add if you prefer:
         // let s = format!("{s};");
         self.set_text(key, s);
+        self.changed();
     }
 
     pub fn set_path(&mut self, path: &Path) {
@@ -1518,6 +1761,7 @@ impl AppModel {
         let needs_quotes = p.contains(' ');
         let val = if needs_quotes { format!("\"{p}\"") } else { p };
         self.set_text(DesktopKey::Path, val);
+        self.changed();
     }
 
     pub fn set_exec_with_args(&mut self, exe: &Path, kind: PickKind, args: Option<&str>) {
@@ -1541,6 +1785,7 @@ impl AppModel {
         } else {
             self.set_text(DesktopKey::Exec, cmd);
         }
+        self.changed();
     }
 
     pub fn context_about(&'_ self) -> Element<'_, Message> {
@@ -1660,12 +1905,21 @@ impl AppModel {
         }
     }
 
+    fn create_xkey(&mut self, xkey_item: &XKeyItem) {
+        self.set_text(
+            DesktopKey::Unknown(xkey_item.name.clone()),
+            xkey_item.value.clone(),
+        );
+        let _ = self.xkey_table.insert(xkey_item.clone());
+    }
+
     fn clear_all(&mut self) {
         self.current_entry = None;
         self.current_entry_path = None;
         self.current_entry_error = None;
         self.mime_table.clear();
-        self.new_mimetype.clear();
+        self.xkey_table.clear();
+        self.dialog_data = None;
     }
 
     fn entry_type(&self) -> Option<DesktopEntryType> {
@@ -1713,6 +1967,15 @@ impl AppModel {
                         }
                     }
                 }
+                let xkeys = crate::xkeys::read_custom_x_keys_localized(
+                    &self.locales,
+                    "Desktop Entry",
+                    &entry,
+                );
+                for xkey_entry in xkeys {
+                    let _ = self.xkey_table.insert(xkey_entry);
+                }
+
                 self.current_entry = Some(entry);
                 self.current_entry_path = Some(path.to_owned());
                 self.create_nav_bar();
@@ -1736,7 +1999,7 @@ impl AppModel {
 
         let path = std::path::Path::new(&args[1]);
         if !path.exists() {
-            let path_str = format!("{:?}", path);
+            let path_str = format!("{path:?}");
             self.current_entry_error = Some(AppError::FileNotFound(path_str));
             return;
         }
@@ -1829,7 +2092,8 @@ pub enum MenuAction {
     SaveAs,
     Quit,
     None,
-    RemoveMimetype(Option<usize>),
+    RemoveMimetype(usize),
+    RemoveXkey(usize),
     NewApplication,
     NewLink,
     NewDirectory,
@@ -1847,6 +2111,7 @@ impl menu::action::MenuAction for MenuAction {
             MenuAction::Quit => Message::Quit,
             MenuAction::None => Message::None,
             MenuAction::RemoveMimetype(pos) => Message::RemoveMimetype(*pos),
+            MenuAction::RemoveXkey(pos) => Message::RemoveXkey(*pos),
             MenuAction::NewApplication => Message::CreateEntry(DesktopEntryType::Application),
             MenuAction::NewLink => Message::CreateEntry(DesktopEntryType::Link),
             MenuAction::NewDirectory => Message::CreateEntry(DesktopEntryType::Directory),
