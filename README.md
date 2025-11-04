@@ -9,7 +9,7 @@ A .desktop entry editor for the supporting desktop environments
 - [x] Read mime descriptions from system xml files like those in /usr/share/mime
 - [x] search system common locations for icons, including Flatpak sandbox
 - [ ] Support editing/creating Actions
-- [ ] Support X-Custom vendor custom keys
+- [x] Support X-Custom vendor custom keys
 
 ## Installation
 
